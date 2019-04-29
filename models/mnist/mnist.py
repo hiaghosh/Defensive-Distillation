@@ -8,6 +8,7 @@ from keras.layers import Dense, Dropout, Flatten, Lambda
 from keras.layers import Conv2D, MaxPooling2D
 from keras import backend as K
 import tensorflow as tf
+from scipy.special import softmax
 tf.logging.set_verbosity(tf.logging.ERROR)
 config = tf.ConfigProto()
 config.gpu_options.allow_growth=True
@@ -27,7 +28,7 @@ img_rows, img_cols = 28, 28
 colors = [[0,0,0], [230/255,159/255,0], [86/255,180/255,233/255], [0,158/255,115/255],
           [213/255,94/255,0], [0,114/255,178/255]]
 
-(x_train, y_train), (x_test, y_test) = mnist.load_data() # (60000, 28, 28)
+(x_train, y_train), (x_test, y_test) = mnist.load_data()
 
 x_train = x_train.astype('float32')
 x_test = x_test.astype('float32')
@@ -47,6 +48,11 @@ else:
 
 folder = os.path.abspath(os.getcwd())
 
+def temperature_cross_entropy(gt, pred):
+    loss = tf.nn.softmax_cross_entropy_with_logits(labels=gt, logits=pred/20)
+    return loss
+
+# 99.33%
 def initial_model(train=True, vis=False):
     model_name = os.path.join(folder, 'initial_model.h5')
     if train:
@@ -61,14 +67,10 @@ def initial_model(train=True, vis=False):
         model.add(Dense(200, activation='relu'))
         model.add(Dropout(0.5))
         model.add(Dense(200, activation='relu'))
-        model.add(Dropout(0.5))
-        # model.add(Lambda(lambda x: x / temperature))
-        K.in_train_phase(x=model.add(Lambda(lambda x: x / 20)), alt=model.add(Lambda(lambda x: x)), training=True)
-        model.add(Dense(num_classes, activation='softmax'))
-        # model.summary()
+        model.add(Dense(num_classes))
 
-        sgd = optimizers.SGD(lr=0.1, decay=0, momentum=0.5, nesterov=False)
-        model.compile(loss=keras.losses.categorical_crossentropy, optimizer=sgd, metrics=['accuracy'])
+        sgd = optimizers.SGD(lr=0.1, decay=1e-6, momentum=0.9, nesterov=True)
+        model.compile(loss=temperature_cross_entropy, optimizer=sgd, metrics=['accuracy'])
         history = model.fit(x_train, y_train, batch_size=batch_size, epochs=epochs, verbose=1)
 
         with open(model_name[:-3]+'_history.h5', 'wb') as f:
@@ -82,18 +84,24 @@ def initial_model(train=True, vis=False):
         plt.title('Initial Model Loss')
         plt.ylabel('Loss')
         plt.xlabel('Epoch')
+        plt.tight_layout()
         # plt.legend(['train'], loc='upper right')
-        plt.show()
+        plt.savefig('initial_model_loss.png')
+        plt.close()
+        # plt.show()
 
-    model = load_model(model_name)
+    model = load_model(model_name, custom_objects={'temperature_cross_entropy': temperature_cross_entropy})
     score = model.evaluate(x_test, y_test, verbose=0)
     print(f'Original Accuracy:\t{score[1]*100}')
 
+# 99.49%
 def distilled_model(train=True, vis=False):
     model_name = os.path.join(folder, 'distilled_model.h5')
     if train:
-        initial_model = load_model(os.path.join(folder, 'initial_model.h5'))
+        initial_model = load_model(os.path.join(folder, 'initial_model.h5'),
+            custom_objects={'temperature_cross_entropy': temperature_cross_entropy})
         y_train = initial_model.predict(x_train, batch_size=batch_size)
+        y_train = softmax(y_train/20, axis=1)
 
         model = Sequential()
         model.add((Conv2D(32, kernel_size=(3, 3), activation='relu', input_shape=input_shape)))
@@ -106,14 +114,10 @@ def distilled_model(train=True, vis=False):
         model.add(Dense(200, activation='relu'))
         model.add(Dropout(0.5))
         model.add(Dense(200, activation='relu'))
-        model.add(Dropout(0.5))
-        # model.add(Lambda(lambda x: x / temperature))
-        K.in_train_phase(x=model.add(Lambda(lambda x: x / 20)), alt=model.add(Lambda(lambda x: x)), training=True)
-        model.add(Dense(num_classes, activation='softmax'))
-        # model.summary()
+        model.add(Dense(num_classes))
 
-        sgd = optimizers.SGD(lr=0.1, decay=0, momentum=0.5, nesterov=False)
-        model.compile(loss=keras.losses.categorical_crossentropy, optimizer=sgd, metrics=['accuracy'])
+        sgd = optimizers.SGD(lr=0.1, decay=1e-6, momentum=0.9, nesterov=True)
+        model.compile(loss=temperature_cross_entropy, optimizer=sgd, metrics=['accuracy'])
         history = model.fit(x_train, y_train, batch_size=batch_size, epochs=epochs, verbose=1)
 
         with open(model_name[:-3]+'_history.h5', 'wb') as f:
@@ -127,10 +131,12 @@ def distilled_model(train=True, vis=False):
         plt.title('Distilled Model Loss')
         plt.ylabel('Loss')
         plt.xlabel('Epoch')
+        plt.tight_layout()
         # plt.legend(['train'], loc='upper right')
-        plt.show()
+        plt.savefig('distilled_model_loss.png')
+        # plt.show()
 
-    model = load_model(model_name)
+    model = load_model(model_name, custom_objects={'temperature_cross_entropy': temperature_cross_entropy})
     score = model.evaluate(x_test, y_test, verbose=0)
     print(f'Distilled Accuracy:\t{score[1]*100}')
 
