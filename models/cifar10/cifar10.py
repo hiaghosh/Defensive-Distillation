@@ -227,7 +227,7 @@ def distilled_model(train=True, vis=False):
 
 def Main():
     initial_model(train=True, vis=True)
-    distilled_model(train=True, vis=True)
+    # distilled_model(train=True, vis=True)
 
 
 if __name__ == "__main__":
